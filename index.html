@@ -34,7 +34,6 @@
         th { background-color: #f2f2f2; position: sticky; top: 0; }
         .status { color: #0066cc; font-size: 1.1em; margin-top: 10px; font-weight: bold; text-align: center; padding: 10px; border-radius: 5px;}
         
-        /* 🚨 하단 안내 문구 스타일 */
         .footer-notice {
             margin-top: 30px;
             padding: 15px;
@@ -143,7 +142,6 @@
         const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
         if (imageFiles.length === 0) return;
 
-        // 새로운 사진 업로드 시 초기화
         finalData = [];
         addressCounter = {};
         resultBody.innerHTML = ""; 
@@ -163,7 +161,6 @@
             });
         }
 
-        // 촬영 시간순 정렬
         fileMetadataArray.sort((a, b) => {
             if (a.dateStr && b.dateStr) return a.dateStr.replace(/\D/g, "") - b.dateStr.replace(/\D/g, "");
             if (a.dateStr) return -1;
@@ -273,11 +270,16 @@
         XLSX.writeFile(wb, `위치분석결과_${new Date().getTime()}.xlsx`);
     }
 
+    // 🚨 변경된 부분: 폴더 없이 사진만 ZIP에 담기
     async function downloadRenamedZip() {
         if (finalData.length === 0) return;
         const zip = new JSZip();
-        const folder = zip.folder("renamed_photos");
-        finalData.forEach(data => { if (data.blob) folder.file(data.newFilename, data.blob); });
+        
+        finalData.forEach(data => { 
+            // folder.file(...) 대신 zip.file(...)을 사용하여 루트에 바로 저장합니다.
+            if (data.blob) zip.file(data.newFilename, data.blob); 
+        });
+
         const content = await zip.generateAsync({ type: "blob" });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(content);
