@@ -33,6 +33,18 @@
         th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
         th { background-color: #f2f2f2; position: sticky; top: 0; }
         .status { color: #0066cc; font-size: 1.1em; margin-top: 10px; font-weight: bold; text-align: center; padding: 10px; border-radius: 5px;}
+        
+        /* 🚨 하단 안내 문구 스타일 */
+        .footer-notice {
+            margin-top: 30px;
+            padding: 15px;
+            background-color: #f1f3f5;
+            border-radius: 6px;
+            color: #666;
+            font-size: 0.95em;
+            text-align: center;
+            border-left: 5px solid #adb5bd;
+        }
     </style>
 </head>
 <body>
@@ -50,7 +62,7 @@
     </div>
 
     <div class="section">
-        <h3>📁 사진 파일 업로드 (촬영 시간순 자동 정렬)</h3>
+        <h3>📁 사진 파일 업로드</h3>
         <div id="dropZone" class="drop-zone">
             <p>📂 사진들을 여기로 드래그하거나 클릭하여 선택하세요.</p>
             <input type="file" id="photoInput" accept="image/*" multiple style="display: none;">
@@ -75,6 +87,10 @@
         </thead>
         <tbody id="resultBody"></tbody>
     </table>
+
+    <div class="footer-notice">
+        💡 <b>안내:</b> 사진을 새로 드래그하여 올리면 기존의 리스트와 번호(카운트)가 모두 <b>초기화</b>됩니다.
+    </div>
 </div>
 
 <script>
@@ -93,16 +109,20 @@
     const photoInput = document.getElementById('photoInput');
 
     dropZone.addEventListener('click', () => photoInput.click());
-    photoInput.addEventListener('change', e => processPhotos(e.target.files));
+    photoInput.addEventListener('change', e => {
+        if (e.target.files.length > 0) processPhotos(e.target.files);
+    });
+
     dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
     dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
     dropZone.addEventListener('drop', e => {
         e.preventDefault();
         dropZone.classList.remove('dragover');
-        processPhotos(e.dataTransfer.files);
+        if (e.dataTransfer.files.length > 0) processPhotos(e.dataTransfer.files);
     });
 
     async function searchManualCoords() {
+        if (!geocoder) { alert("시스템 준비 중입니다."); return; }
         const lat = parseFloat(document.getElementById('manualLat').value);
         const lng = parseFloat(document.getElementById('manualLng').value);
         if (isNaN(lat) || isNaN(lng)) { alert("정확한 좌표를 입력해주세요."); return; }
@@ -119,39 +139,40 @@
         if (!geocoder) { alert("시스템 준비 중입니다."); return; }
         
         const statusMsg = document.getElementById('statusMsg');
+        const resultBody = document.getElementById('resultBody');
         const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
         if (imageFiles.length === 0) return;
+
+        // 새로운 사진 업로드 시 초기화
+        finalData = [];
+        addressCounter = {};
+        resultBody.innerHTML = ""; 
+        document.getElementById('downloadBtn').style.display = "none";
+        document.getElementById('zipBtn').style.display = "none";
 
         statusMsg.innerText = `사진 촬영 시간 분석 중...`;
         document.getElementById('resultTable').style.display = "table";
 
-        // 1. 메타데이터 추출
         let fileMetadataArray = [];
         for (let i = 0; i < imageFiles.length; i++) {
             const file = imageFiles[i];
             const meta = await getPhotoMetadata(file);
             fileMetadataArray.push({
-                file: file,
-                lat: meta.lat,
-                lng: meta.lng,
-                dateStr: meta.dateStr, 
-                timestamp: meta.timestamp 
+                file: file, lat: meta.lat, lng: meta.lng,
+                dateStr: meta.dateStr, timestamp: meta.timestamp 
             });
         }
 
-        // 2. 단단한 정렬 (촬영 시간순 -> 파일 수정 시간순)
+        // 촬영 시간순 정렬
         fileMetadataArray.sort((a, b) => {
-            if (a.dateStr && b.dateStr) {
-                return a.dateStr.replace(/\D/g, "") - b.dateStr.replace(/\D/g, "");
-            }
+            if (a.dateStr && b.dateStr) return a.dateStr.replace(/\D/g, "") - b.dateStr.replace(/\D/g, "");
             if (a.dateStr) return -1;
             if (b.dateStr) return 1;
             return a.timestamp - b.timestamp;
         });
 
-        // 3. 정렬된 순서대로 주소 변환 및 번호 부여
         for (let i = 0; i < fileMetadataArray.length; i++) {
-            statusMsg.innerText = `주소 변환 및 번호 부여 중... (${i + 1} / ${fileMetadataArray.length})`;
+            statusMsg.innerText = `주소 변환 중... (${i + 1} / ${fileMetadataArray.length})`;
             const item = fileMetadataArray[i];
             let address = "위치 정보 없음";
             let latStr = "-", lngStr = "-";
@@ -164,12 +185,8 @@
 
             const newName = generateNewName(address, item.file.name);
             const data = { 
-                filename: item.file.name, 
-                newFilename: newName, 
-                lat: latStr, 
-                lng: lngStr, 
-                address: address, 
-                blob: item.file 
+                filename: item.file.name, newFilename: newName, 
+                lat: latStr, lng: lngStr, address: address, blob: item.file 
             };
             
             finalData.push(data);
@@ -178,14 +195,12 @@
 
         statusMsg.innerText = "✨ 분석 완료! 촬영 시간순으로 번호가 매겨졌습니다.";
         showResultsUI();
+        photoInput.value = ""; 
     }
 
-    // 파일명 생성 규칙 (군 읍면 리 지번(번호).확장자)
     function generateNewName(address, originalName) {
         if (address === "위치 정보 없음" || address === "주소 찾기 불가") return originalName;
-
         const parts = address.split(' ');
-        // '도' 단위만 제외하고 군, 읍/면, 리, 지번 유지
         const filteredParts = parts.filter(p => !p.endsWith('도') && !p.endsWith('특별시') && !p.endsWith('광역시'));
         const cleanAddr = filteredParts.join(' ');
         
@@ -194,7 +209,6 @@
 
         const num = String(addressCounter[cleanAddr]).padStart(3, '0');
         const ext = originalName.split('.').pop();
-        
         return `${cleanAddr}(${num}).${ext}`;
     }
 
@@ -206,7 +220,6 @@
                 const latRef = EXIF.getTag(this, "GPSLatitudeRef");
                 const lngRef = EXIF.getTag(this, "GPSLongitudeRef");
                 const dateOriginal = EXIF.getTag(this, "DateTimeOriginal");
-
                 let result = { lat: null, lng: null, dateStr: dateOriginal, timestamp: file.lastModified };
                 if (lat && lng) {
                     const convert = (dms, ref) => {
@@ -249,12 +262,10 @@
     }
 
     function exportToExcel() {
+        if (finalData.length === 0) return;
         const wsData = finalData.map(d => ({
-            "원본파일명": d.filename,
-            "변경파일명": d.newFilename,
-            "위도": d.lat,
-            "경도": d.lng,
-            "법정동주소": d.address
+            "원본파일명": d.filename, "변경파일명": d.newFilename,
+            "위도": d.lat, "경도": d.lng, "법정동주소": d.address
         }));
         const ws = XLSX.utils.json_to_sheet(wsData);
         const wb = XLSX.utils.book_new();
@@ -263,6 +274,7 @@
     }
 
     async function downloadRenamedZip() {
+        if (finalData.length === 0) return;
         const zip = new JSZip();
         const folder = zip.folder("renamed_photos");
         finalData.forEach(data => { if (data.blob) folder.file(data.newFilename, data.blob); });
