@@ -262,4 +262,44 @@
     function addTableRow(data) {
         const row = `<tr>
             <td>${data.filename}</td>
-            <td style="
+            <td style="color: #d9534f; font-weight: bold;">${data.newFilename}</td>
+            <td>${data.lat}</td>
+            <td>${data.lng}</td>
+            <td>${data.address}</td>
+        </tr>`;
+        document.getElementById('resultBody').innerHTML += row;
+    }
+
+    function showResultsUI() {
+        document.getElementById('downloadBtn').style.display = "inline-block";
+        document.getElementById('zipBtn').style.display = "inline-block";
+        document.getElementById('resultTable').style.display = "table";
+    }
+
+    function exportToExcel() {
+        if (finalData.length === 0) return;
+        const wsData = finalData.map(d => ({
+            "원본파일명": d.filename, "변경파일명": d.newFilename,
+            "위도": d.lat, "경도": d.lng, "법정동주소": d.address
+        }));
+        const ws = XLSX.utils.json_to_sheet(wsData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Result");
+        XLSX.writeFile(wb, `위치분석결과_${new Date().getTime()}.xlsx`);
+    }
+
+    async function downloadRenamedZip() {
+        if (finalData.length === 0) return;
+        const zip = new JSZip();
+        finalData.forEach(data => { 
+            if (data.blob) zip.file(data.newFilename, data.blob); 
+        });
+        const content = await zip.generateAsync({ type: "blob" });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(content);
+        link.download = `변경된사진_${new Date().getTime()}.zip`;
+        link.click();
+    }
+</script>
+</body>
+</html>
