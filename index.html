@@ -142,7 +142,6 @@
         const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
         if (imageFiles.length === 0) return;
 
-        // 초기화
         finalData = [];
         addressCounter = {};
         resultBody.innerHTML = ""; 
@@ -162,11 +161,8 @@
             });
         }
 
-        // 🚨 단단한 정렬 로직 적용
         fileMetadataArray.sort((a, b) => {
-            if (a.dateStr && b.dateStr) {
-                return a.dateStr.replace(/\D/g, "") - b.dateStr.replace(/\D/g, "");
-            }
+            if (a.dateStr && b.dateStr) return a.dateStr.replace(/\D/g, "") - b.dateStr.replace(/\D/g, "");
             if (a.dateStr) return -1;
             if (b.dateStr) return 1;
             return a.timestamp - b.timestamp;
@@ -199,12 +195,19 @@
         photoInput.value = ""; 
     }
 
+    // --- 🚨 변경된 부분: 시/도 이름을 무조건 첫 단어에서 제거하여 통일 ---
     function generateNewName(address, originalName) {
         if (address === "위치 정보 없음" || address === "주소 찾기 불가") return originalName;
-        const parts = address.split(' ');
-        // 광역자치단체만 제외 (정선군 등 기초지자체부터 유지)
-        const filteredParts = parts.filter(p => !p.endsWith('도') && !p.endsWith('특별시') && !p.endsWith('광역시'));
-        const cleanAddr = filteredParts.join(' ');
+        
+        let parts = address.split(' ');
+        
+        // 주소의 첫 번째 단어(강원특별자치도, 부산, 부산광역시 등)를 무조건 제거합니다.
+        // 이렇게 하면 기초지자체(정선군, 수영구, 부산진구)부터 이름이 시작되어 통일됩니다.
+        if (parts.length > 1) {
+            parts.shift(); 
+        }
+        
+        const cleanAddr = parts.join(' ');
         
         if (!addressCounter[cleanAddr]) addressCounter[cleanAddr] = 1;
         else addressCounter[cleanAddr]++;
@@ -236,17 +239,13 @@
         });
     }
 
-    // --- 🚨 주소 변환 (지번 없으면 행정구역으로 대체) - 업데이트 완료 ---
     function getAddressFromCoords(lat, lng) {
         return new Promise(resolve => {
             var coord = new kakao.maps.LatLng(lat, lng);
-            
-            // 1순위: 지번 주소 시도
             geocoder.coord2Address(coord.getLng(), coord.getLat(), function(result, status) {
                 if (status === kakao.maps.services.Status.OK) {
                     resolve(result[0].address.address_name);
                 } else {
-                    // 2순위: 지번이 없는 곳이라면 행정구역 주소 시도 (부산 광안리 등 처리)
                     geocoder.coord2RegionCode(coord.getLng(), coord.getLat(), function(regionResult, regionStatus) {
                         if (regionStatus === kakao.maps.services.Status.OK) {
                             resolve(regionResult[0].address_name);
