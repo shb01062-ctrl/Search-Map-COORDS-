@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <title>사진 위치 분석 및 파일명 관리 도구</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exif-js/2.3.0/exif.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=6fc7aff34f9c4762b8c5e7bfabf65c33&libraries=services&autoload=false"></script>
+    
+    <style>
+        body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; line-height: 1.6; background-color: #f8f9fa; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h2 { color: #333; border-bottom: 2px solid #fee500; padding-bottom: 10px; margin-top: 0; }
+        
+        .section { margin-bottom: 30px; padding: 20px; border: 1px solid #eee; border-radius: 8px; }
+        h3 { margin-top: 0; font-size: 1.1em; color: #555; }
+
+        /* 수동 검색 영역 */
+        .manual-search { display: flex; gap: 10px; align-items: center; margin-bottom: 15px; }
+        .manual-search input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; width: 150px; }
+
+        /* 드래그 앤 드롭 영역 */
+        .drop-zone { padding: 40px 20px; border: 2px dashed #ccc; border-radius: 8px; text-align: center; background-color: #fcfcfc; cursor: pointer; transition: 0.3s; }
+        .drop-zone.dragover { background-color: #fff9c4; border-color: #fee500; }
+        
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; }
+        button { padding: 10px 20px; background: #fee500; border: none; cursor: pointer; border-radius: 6px; font-weight: bold; transition: 0.3s; }
+        button:hover { background: #ffd400; }
+        .btn-excel { background: #28a745; color: white; display: none; }
+        .btn-zip { background: #007bff; color: white; display: none; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 0.85em; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #f2f2f2; position: sticky; top: 0; }
+        .status { color: #0066cc; font-size: 1.1em; margin-top: 10px; font-weight: bold; text-align: center; padding: 10px; border-radius: 5px;}
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>📸 위치 정보 분석 및 파일명 자동 변경</h2>
+    
+    <div class="section">
+        <h3>📍 수동 좌표 검색</h3>
+        <div class="manual-search">
+            <input type="text" id="manualLat" placeholder="위도 (예: 37.55)">
+            <input type="text" id="manualLng" placeholder="경도 (예: 126.90)">
+            <button onclick="searchManualCoords()">주소 찾기 및 추가</button>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>📁 사진 파일 업로드 (파일명 자동 생성)</h3>
+        <div id="dropZone" class="drop-zone">
+            <p>📂 사진들을 여기로 드래그하거나 클릭하여 선택하세요.</p>
+            <input type="file" id="photoInput" accept="image/*" multiple style="display: none;">
+        </div>
+        <div id="statusMsg" class="status">✅ 준비 완료! 사진을 드래그하거나 수동으로 검색하세요.</div>
+        
+        <div class="btn-group">
+            <button id="downloadBtn" class="btn-excel" onclick="exportToExcel()">엑셀(.xlsx) 저장</button>
+            <button id="zipBtn" class="btn-zip" onclick="downloadRenamedZip()">이름 변경된 사진(ZIP) 저장</button>
+        </div>
+    </div>
+
+    <table id="resultTable" style="display:none;">
+        <thead>
+            <tr>
+                <th>원본 파일명</th>
+                <th>변경될 파일명</th>
+                <th>위도</th>
+                <th>경도</th>
+                <th>법정동 주소</th>
+            </tr>
+        </thead>
+        <tbody id="resultBody"></tbody>
+    </table>
+</div>
+
+<script>
+    // 드래그 방지
+    window.addEventListener('dragover', e => e.preventDefault());
+    window.addEventListener('drop', e => e.preventDefault());
+
+    var finalData = [];
+    var addressCounter = {}; // 주소별 번호 매기기용
+    var geocoder = null;
+    var photoFiles = []; // ZIP 생성을 위한 실제 파일 보관
+
+    // 카카오 API 로드
+    kakao.maps.load(function() {
+        geocoder = new kakao.maps.services.Geocoder();
+    });
+
+    const dropZone = document.getElementById('dropZone');
+    const photoInput = document.getElementById('photoInput');
+
+    dropZone.addEventListener('click', () => photoInput.click());
+    photoInput.addEventListener('change', e => processPhotos(e.target.files));
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        processPhotos(e.dataTransfer.files);
+    });
+
+    // --- [기능 1] 수동 좌표 검색 ---
+    async function searchManualCoords() {
+        const lat = parseFloat(document.getElementById('manualLat').value);
+        const lng = parseFloat(document.getElementById('manualLng').value);
+
+        if (isNaN(lat) || isNaN(lng)) {
+            alert("정확한 위도와 경도를 입력해주세요.");
+            return;
+        }
+
+        const address = await getAddressFromCoords(lat, lng);
+        const newName = generateNewName(address, "manual_input.jpg");
+        
+        const data = { filename: "수동 입력", newFilename: newName, lat: lat.toFixed(6), lng: lng.toFixed(6), address: address };
+        finalData.push(data);
+        addTableRow(data);
+        showResultsUI();
+    }
+
+    // --- [기능 2] 사진 처리 및 자동 이름 생성 ---
+    async function processPhotos(files) {
+        if (!geocoder) { alert("시스템이 아직 준비되지 않았습니다. 잠시만 기다려주세요."); return; }
+        
+        const statusMsg = document.getElementById('statusMsg');
+        const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+        
+        if (imageFiles.length === 0) return;
+
+        statusMsg.innerText = `분석 중... (0 / ${imageFiles.length})`;
+        document.getElementById('resultTable').style.display = "table";
+
+        for (let i = 0; i < imageFiles.length; i++) {
+            const file = imageFiles[i];
+            try {
+                const coords = await getGpsFromPhoto(file);
+                let address = "위치 정보 없음";
+                let lat = "-", lng = "-";
+
+                if (coords) {
+                    address = await getAddressFromCoords(coords.lat, coords.lng);
+                    lat = coords.lat.toFixed(6);
+                    lng = coords.lng.toFixed(6);
+                }
+
+                const newName = generateNewName(address, file.name);
+                const data = { filename: file.name, newFilename: newName, lat: lat, lng: lng, address: address, blob: file };
+                
+                finalData.push(data);
+                addTableRow(data);
+                statusMsg.innerText = `분석 중... (${i + 1} / ${imageFiles.length})`;
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        statusMsg.innerText = "✨ 분석 완료! 변경된 이름을 확인하고 저장하세요.";
+        showResultsUI();
+    }
+
+    // 주소 기반 새 이름 생성 (번호 자동 매기기)
+    function generateNewName(address, originalName) {
+        if (address === "위치 정보 없음" || address === "주소 찾기 불가") return originalName;
+
+        // 주소에서 공백 제거하여 파일명 정리
+        const cleanAddr = address.replace(/\s/g, '_');
+        
+        if (!addressCounter[cleanAddr]) addressCounter[cleanAddr] = 1;
+        else addressCounter[cleanAddr]++;
+
+        const num = String(addressCounter[cleanAddr]).padStart(3, '0');
+        const ext = originalName.split('.').pop();
+        return `${cleanAddr}_${num}.${ext}`;
+    }
+
+    function getGpsFromPhoto(file) {
+        return new Promise(resolve => {
+            EXIF.getData(file, function() {
+                const lat = EXIF.getTag(this, "GPSLatitude");
+                const lng = EXIF.getTag(this, "GPSLongitude");
+                const latRef = EXIF.getTag(this, "GPSLatitudeRef");
+                const lngRef = EXIF.getTag(this, "GPSLongitudeRef");
+
+                if (lat && lng) {
+                    const convert = (dms, ref) => {
+                        let dec = dms[0] + dms[1]/60 + dms[2]/3600;
+                        return (ref === "S" || ref === "W") ? dec * -1 : dec;
+                    };
+                    resolve({ lat: convert(lat, latRef), lng: convert(lng, lngRef) });
+                } else resolve(null);
+            });
+        });
+    }
+
+    function getAddressFromCoords(lat, lng) {
+        return new Promise(resolve => {
+            const coord = new kakao.maps.LatLng(lat, lng);
+            geocoder.coord2Address(coord.getLng(), coord.getLat(), (result, status) => {
+                if (status === kakao.maps.services.Status.OK) resolve(result[0].address.address_name);
+                else resolve("주소 찾기 불가");
+            });
+        });
+    }
+
+    function addTableRow(data) {
+        const row = `<tr>
+            <td>${data.filename}</td>
+            <td style="color: #d9534f; font-weight: bold;">${data.newFilename}</td>
+            <td>${data.lat}</td>
+            <td>${data.lng}</td>
+            <td>${data.address}</td>
+        </tr>`;
+        document.getElementById('resultBody').innerHTML += row;
+    }
+
+    function showResultsUI() {
+        document.getElementById('downloadBtn').style.display = "block";
+        document.getElementById('zipBtn').style.display = "block";
+        document.getElementById('resultTable').style.display = "table";
+    }
+
+    function exportToExcel() {
+        const wsData = finalData.map(d => ({
+            "원본파일명": d.filename,
+            "변경파일명": d.newFilename,
+            "위도": d.lat,
+            "경도": d.lng,
+            "법정동주소": d.address
+        }));
+        const ws = XLSX.utils.json_to_sheet(wsData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Result");
+        XLSX.writeFile(wb, `위치분석결과_${new Date().getTime()}.xlsx`);
+    }
+
+    // 변경된 이름으로 사진 전체 압축 다운로드
+    async function downloadRenamedZip() {
+        const zip = new JSZip();
+        const folder = zip.folder("renamed_photos");
+        
+        finalData.forEach(data => {
+            if (data.blob) folder.file(data.newFilename, data.blob);
+        });
+
+        const content = await zip.generateAsync({ type: "blob" });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(content);
+        link.download = `변경된사진_${new Date().getTime()}.zip`;
+        link.click();
+    }
+</script>
+</body>
+</html>
