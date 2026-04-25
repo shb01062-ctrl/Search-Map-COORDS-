@@ -196,15 +196,16 @@
         showResultsUI();
     }
 
-    // --- 🚨 변경된 부분: 파일명 형식 조립 ---
+    // --- 🚨 변경된 부분: 파일명에 읍/면 살리기 ---
     function generateNewName(address, originalName) {
         if (address === "위치 정보 없음" || address === "주소 찾기 불가") return originalName;
 
-        // 1. 카카오 주소에서 '도', '읍/면' 부분 제외 (예: 강원특별자치도 정선군 임계면 고양리 106 -> 정선군 고양리 106)
+        // 1. 카카오 주소에서 '도', '특별시', '광역시'로 끝나는 광역 단위만 제외
+        // (예: 강원특별자치도 정선군 임계면 고양리 106 -> 정선군 임계면 고양리 106)
         const parts = address.split(' ');
-        const filteredParts = parts.filter(p => !p.endsWith('도') && !p.endsWith('읍') && !p.endsWith('면'));
+        const filteredParts = parts.filter(p => !p.endsWith('도') && !p.endsWith('특별시') && !p.endsWith('광역시'));
         
-        // 2. 남은 군, 리, 지번을 공백으로 연결
+        // 2. 남은 부분을 공백으로 연결
         const cleanAddr = filteredParts.join(' ');
         
         // 3. 주소별 번호 카운팅
@@ -215,7 +216,7 @@
         const num = String(addressCounter[cleanAddr]).padStart(3, '0');
         const ext = originalName.split('.').pop();
         
-        // 5. 괄호를 포함하여 최종 파일명 조립 (예: 정선군 고양리 106(001).jpg)
+        // 5. 괄호를 포함하여 최종 파일명 조립 (예: 정선군 임계면 고양리 106(001).jpg)
         return `${cleanAddr}(${num}).${ext}`;
     }
 
