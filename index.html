@@ -52,7 +52,7 @@
     </div>
 
     <div class="section">
-        <h3>📁 사진 파일 업로드 (파일명 자동 생성)</h3>
+        <h3>📁 사진 파일 업로드 (파일명 자동 생성 / 시간순 정렬)</h3>
         <div id="dropZone" class="drop-zone">
             <p>📂 사진들을 여기로 드래그하거나 클릭하여 선택하세요.</p>
             <input type="file" id="photoInput" accept="image/*" multiple style="display: none;">
@@ -87,7 +87,6 @@
     var finalData = [];
     var addressCounter = {}; // 주소별 번호 매기기용
     var geocoder = null;
-    var photoFiles = []; // ZIP 생성을 위한 실제 파일 보관
 
     // 카카오 API 로드
     kakao.maps.load(function() {
@@ -126,7 +125,7 @@
         showResultsUI();
     }
 
-    // --- [기능 2] 사진 처리 및 자동 이름 생성 ---
+    // --- [기능 2] 사진 처리, 날짜 정렬 및 자동 이름 생성 ---
     async function processPhotos(files) {
         if (!geocoder) { alert("시스템이 아직 준비되지 않았습니다. 잠시만 기다려주세요."); return; }
         
@@ -135,31 +134,63 @@
         
         if (imageFiles.length === 0) return;
 
-        statusMsg.innerText = `분석 중... (0 / ${imageFiles.length})`;
+        statusMsg.innerText = `사진 날짜 정보 추출 및 정렬 중...`;
         document.getElementById('resultTable').style.display = "table";
 
+        // 1단계: 모든 파일의 메타데이터(날짜, 좌표)를 먼저 추출
+        let fileMetadataArray = [];
         for (let i = 0; i < imageFiles.length; i++) {
             const file = imageFiles[i];
-            try {
-                const coords = await getGpsFromPhoto(file);
-                let address = "위치 정보 없음";
-                let lat = "-", lng = "-";
+            const meta = await getPhotoMetadata(file);
+            fileMetadataArray.push({
+                file: file,
+                lat: meta.lat,
+                lng: meta.lng,
+                dateStr: meta.dateStr, // EXIF 원본 촬영 날짜 ("YYYY:MM:DD HH:MM:SS")
+                timestamp: meta.timestamp // EXIF가 없을 경우를 대비한 파일 시스템 수정 날짜
+            });
+        }
 
-                if (coords) {
-                    address = await getAddressFromCoords(coords.lat, coords.lng);
-                    lat = coords.lat.toFixed(6);
-                    lng = coords.lng.toFixed(6);
-                }
-
-                const newName = generateNewName(address, file.name);
-                const data = { filename: file.name, newFilename: newName, lat: lat, lng: lng, address: address, blob: file };
-                
-                finalData.push(data);
-                addTableRow(data);
-                statusMsg.innerText = `분석 중... (${i + 1} / ${imageFiles.length})`;
-            } catch (err) {
-                console.error(err);
+        // 2단계: 시간 순서대로 배열 정렬 (오래된 사진이 먼저 오도록)
+        fileMetadataArray.sort((a, b) => {
+            if (a.dateStr && b.dateStr) {
+                return a.dateStr.localeCompare(b.dateStr); // 날짜 문자열 비교
+            } else if (a.dateStr) {
+                return -1; // EXIF 날짜가 있는 것을 우선
+            } else if (b.dateStr) {
+                return 1;
+            } else {
+                return a.timestamp - b.timestamp; // 둘 다 없으면 파일 수정 시간 기준
             }
+        });
+
+        // 3단계: 정렬된 순서대로 카카오 주소 변환 및 번호 생성
+        for (let i = 0; i < fileMetadataArray.length; i++) {
+            statusMsg.innerText = `주소 변환 및 번호 부여 중... (${i + 1} / ${fileMetadataArray.length})`;
+            
+            const item = fileMetadataArray[i];
+            let address = "위치 정보 없음";
+            let latStr = "-", lngStr = "-";
+
+            if (item.lat && item.lng) {
+                address = await getAddressFromCoords(item.lat, item.lng);
+                latStr = item.lat.toFixed(6);
+                lngStr = item.lng.toFixed(6);
+            }
+
+            // 정렬된 순서대로 함수를 통과하므로 자연스럽게 시간순 번호가 매겨집니다.
+            const newName = generateNewName(address, item.file.name);
+            const data = { 
+                filename: item.file.name, 
+                newFilename: newName, 
+                lat: latStr, 
+                lng: lngStr, 
+                address: address, 
+                blob: item.file 
+            };
+            
+            finalData.push(data);
+            addTableRow(data);
         }
 
         statusMsg.innerText = "✨ 분석 완료! 변경된 이름을 확인하고 저장하세요.";
@@ -181,21 +212,34 @@
         return `${cleanAddr}_${num}.${ext}`;
     }
 
-    function getGpsFromPhoto(file) {
+    // 통합 메타데이터 추출 (좌표 + 촬영 날짜)
+    function getPhotoMetadata(file) {
         return new Promise(resolve => {
             EXIF.getData(file, function() {
                 const lat = EXIF.getTag(this, "GPSLatitude");
                 const lng = EXIF.getTag(this, "GPSLongitude");
                 const latRef = EXIF.getTag(this, "GPSLatitudeRef");
                 const lngRef = EXIF.getTag(this, "GPSLongitudeRef");
+                
+                // EXIF에서 촬영 원본 날짜 가져오기 (예: "2026:04:25 14:48:13")
+                const dateOriginal = EXIF.getTag(this, "DateTimeOriginal");
+
+                let result = { 
+                    lat: null, 
+                    lng: null, 
+                    dateStr: dateOriginal, 
+                    timestamp: file.lastModified 
+                };
 
                 if (lat && lng) {
                     const convert = (dms, ref) => {
                         let dec = dms[0] + dms[1]/60 + dms[2]/3600;
                         return (ref === "S" || ref === "W") ? dec * -1 : dec;
                     };
-                    resolve({ lat: convert(lat, latRef), lng: convert(lng, lngRef) });
-                } else resolve(null);
+                    result.lat = convert(lat, latRef);
+                    result.lng = convert(lng, lngRef);
+                }
+                resolve(result);
             });
         });
     }
@@ -222,8 +266,8 @@
     }
 
     function showResultsUI() {
-        document.getElementById('downloadBtn').style.display = "block";
-        document.getElementById('zipBtn').style.display = "block";
+        document.getElementById('downloadBtn').style.display = "inline-block";
+        document.getElementById('zipBtn').style.display = "inline-block";
         document.getElementById('resultTable').style.display = "table";
     }
 
