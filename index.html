@@ -127,7 +127,8 @@
         if (isNaN(lat) || isNaN(lng)) { alert("정확한 좌표를 입력해주세요."); return; }
 
         const address = await getAddressFromCoords(lat, lng);
-        const newName = generateNewName(address, "manual_input.jpg");
+        // 전체 순번 추가: finalData.length + 1
+        const newName = generateNewName(address, "manual_input.jpg", finalData.length + 1);
         const data = { filename: "수동 입력", newFilename: newName, lat: lat.toFixed(6), lng: lng.toFixed(6), address: address };
         finalData.push(data);
         addTableRow(data);
@@ -180,7 +181,8 @@
                 lngStr = item.lng.toFixed(6);
             }
 
-            const newName = generateNewName(address, item.file.name);
+            // 전체 순번 추가: i + 1 인덱스 전달
+            const newName = generateNewName(address, item.file.name, i + 1);
             const data = { 
                 filename: item.file.name, newFilename: newName, 
                 lat: latStr, lng: lngStr, address: address, blob: item.file 
@@ -195,14 +197,17 @@
         photoInput.value = ""; 
     }
 
-    // --- 🚨 변경된 부분: 시/도 이름을 무조건 첫 단어에서 제거하여 통일 ---
-    function generateNewName(address, originalName) {
-        if (address === "위치 정보 없음" || address === "주소 찾기 불가") return originalName;
+    // 변경된 부분: globalIndex(전체 순번) 매개변수를 추가하여 파일명 맨 앞에 붙임
+    function generateNewName(address, originalName, globalIndex) {
+        let prefix = globalIndex ? `(${globalIndex}) ` : ``;
+
+        if (address === "위치 정보 없음" || address === "주소 찾기 불가") {
+            return `${prefix}${originalName}`;
+        }
         
         let parts = address.split(' ');
         
         // 주소의 첫 번째 단어(강원특별자치도, 부산, 부산광역시 등)를 무조건 제거합니다.
-        // 이렇게 하면 기초지자체(정선군, 수영구, 부산진구)부터 이름이 시작되어 통일됩니다.
         if (parts.length > 1) {
             parts.shift(); 
         }
@@ -214,7 +219,8 @@
 
         const num = String(addressCounter[cleanAddr]).padStart(3, '0');
         const ext = originalName.split('.').pop();
-        return `${cleanAddr}(${num}).${ext}`;
+
+        return `${prefix}${cleanAddr}(${num}).${ext}`;
     }
 
     function getPhotoMetadata(file) {
