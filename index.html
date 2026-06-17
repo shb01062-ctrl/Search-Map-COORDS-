@@ -18,7 +18,7 @@
         h3 { margin-top: 0; font-size: 1.1em; color: #555; }
 
         .manual-search { display: flex; gap: 10px; align-items: center; margin-bottom: 15px; }
-        .manual-search input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; width: 150px; }
+        .manual-search input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; text-align: center; }
 
         .drop-zone { padding: 40px 20px; border: 2px dashed #ccc; border-radius: 8px; text-align: center; background-color: #fcfcfc; cursor: pointer; transition: 0.3s; }
         .drop-zone.dragover { background-color: #fff9c4; border-color: #fee500; }
@@ -52,11 +52,21 @@
     <h2>📸 좌표 정보를 이용하여 법정동 주소를 출력합니다.</h2>
     
     <div class="section">
-        <h3>📍 수동 좌표 검색</h3>
-        <div class="manual-search">
-            <input type="text" id="manualLat" placeholder="위도 (예: 37.55)">
-            <input type="text" id="manualLng" placeholder="경도 (예: 126.90)">
-            <button onclick="searchManualCoords()">주소 찾기 및 추가</button>
+        <h3>📍 수동 좌표 검색 (사진 속성 정보 입력)</h3>
+        <div class="manual-search" style="flex-wrap: wrap;">
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <b>위도:</b>
+                <input type="number" id="latDeg" placeholder="37" style="width: 60px;"> <b>;</b>
+                <input type="number" id="latMin" placeholder="24" style="width: 60px;"> <b>;</b>
+                <input type="number" step="any" id="latSec" placeholder="12.95999..." style="width: 110px;">
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center; margin-left: 15px;">
+                <b>경도:</b>
+                <input type="number" id="lngDeg" placeholder="128" style="width: 60px;"> <b>;</b>
+                <input type="number" id="lngMin" placeholder="41" style="width: 60px;"> <b>;</b>
+                <input type="number" step="any" id="lngSec" placeholder="30.46199..." style="width: 110px;">
+            </div>
+            <button onclick="searchManualCoords()" style="margin-left: 15px;">주소 찾기 및 추가</button>
         </div>
     </div>
 
@@ -121,18 +131,41 @@
     });
 
     async function searchManualCoords() {
-        if (!geocoder) { alert("시스템 준비 중입니다."); return; }
-        const lat = parseFloat(document.getElementById('manualLat').value);
-        const lng = parseFloat(document.getElementById('manualLng').value);
-        if (isNaN(lat) || isNaN(lng)) { alert("정확한 좌표를 입력해주세요."); return; }
+        if (!geocoder) { alert("시스템 준비 중입니다. 잠시 후 다시 시도해주세요."); return; }
+        
+        const latD = parseFloat(document.getElementById('latDeg').value) || 0;
+        const latM = parseFloat(document.getElementById('latMin').value) || 0;
+        const latS = parseFloat(document.getElementById('latSec').value) || 0;
+        
+        const lngD = parseFloat(document.getElementById('lngDeg').value) || 0;
+        const lngM = parseFloat(document.getElementById('lngMin').value) || 0;
+        const lngS = parseFloat(document.getElementById('lngSec').value) || 0;
+
+        if (latD === 0 && lngD === 0) { 
+            alert("정확한 좌표를 입력해주세요."); 
+            return; 
+        }
+
+        const lat = latD + (latM / 60) + (latS / 3600);
+        const lng = lngD + (lngM / 60) + (lngS / 3600);
 
         const address = await getAddressFromCoords(lat, lng);
-        // 전체 순번 추가: finalData.length + 1
         const newName = generateNewName(address, "manual_input.jpg", finalData.length + 1);
-        const data = { filename: "수동 입력", newFilename: newName, lat: lat.toFixed(6), lng: lng.toFixed(6), address: address };
+        const data = { 
+            filename: "수동 입력", 
+            newFilename: newName, 
+            lat: lat.toFixed(6), 
+            lng: lng.toFixed(6), 
+            address: address 
+        };
+        
         finalData.push(data);
         addTableRow(data);
         showResultsUI();
+        
+        // 입력 후 칸 비우기 (원치 않으시면 아래 6줄은 지우셔도 됩니다)
+        document.getElementById('latDeg').value = ''; document.getElementById('latMin').value = ''; document.getElementById('latSec').value = '';
+        document.getElementById('lngDeg').value = ''; document.getElementById('lngMin').value = ''; document.getElementById('lngSec').value = '';
     }
 
     async function processPhotos(files) {
@@ -149,7 +182,7 @@
         document.getElementById('downloadBtn').style.display = "none";
         document.getElementById('zipBtn').style.display = "none";
 
-        statusMsg.innerText = `사진 촬영 시간 분석 중...`;
+        statusMsg.innerText = `사진 분석 중... (오류 파일은 자동 스킵됩니다)`;
         document.getElementById('resultTable').style.display = "table";
 
         let fileMetadataArray = [];
@@ -181,7 +214,6 @@
                 lngStr = item.lng.toFixed(6);
             }
 
-            // 전체 순번 추가: i + 1 인덱스 전달
             const newName = generateNewName(address, item.file.name, i + 1);
             const data = { 
                 filename: item.file.name, newFilename: newName, 
@@ -197,7 +229,6 @@
         photoInput.value = ""; 
     }
 
-    // 변경된 부분: globalIndex(전체 순번) 매개변수를 추가하여 파일명 맨 앞에 붙임
     function generateNewName(address, originalName, globalIndex) {
         let prefix = globalIndex ? `(${globalIndex}) ` : ``;
 
@@ -207,7 +238,6 @@
         
         let parts = address.split(' ');
         
-        // 주소의 첫 번째 단어(강원특별자치도, 부산, 부산광역시 등)를 무조건 제거합니다.
         if (parts.length > 1) {
             parts.shift(); 
         }
@@ -225,23 +255,38 @@
 
     function getPhotoMetadata(file) {
         return new Promise(resolve => {
-            EXIF.getData(file, function() {
-                const lat = EXIF.getTag(this, "GPSLatitude");
-                const lng = EXIF.getTag(this, "GPSLongitude");
-                const latRef = EXIF.getTag(this, "GPSLatitudeRef");
-                const lngRef = EXIF.getTag(this, "GPSLongitudeRef");
-                const dateOriginal = EXIF.getTag(this, "DateTimeOriginal");
-                let result = { lat: null, lng: null, dateStr: dateOriginal, timestamp: file.lastModified };
-                if (lat && lng) {
-                    const convert = (dms, ref) => {
-                        let dec = dms[0] + dms[1]/60 + dms[2]/3600;
-                        return (ref === "S" || ref === "W") ? dec * -1 : dec;
-                    };
-                    result.lat = convert(lat, latRef);
-                    result.lng = convert(lng, lngRef);
-                }
-                resolve(result);
-            });
+            // 타임아웃 설정: 손상된 사진으로 인한 무한 대기 방지
+            const timeoutId = setTimeout(() => {
+                resolve({ lat: null, lng: null, dateStr: null, timestamp: file.lastModified });
+            }, 1500);
+
+            try {
+                EXIF.getData(file, function() {
+                    clearTimeout(timeoutId); // 정상 콜백 시 타임아웃 해제
+
+                    const lat = EXIF.getTag(this, "GPSLatitude");
+                    const lng = EXIF.getTag(this, "GPSLongitude");
+                    const latRef = EXIF.getTag(this, "GPSLatitudeRef");
+                    const lngRef = EXIF.getTag(this, "GPSLongitudeRef");
+                    const dateOriginal = EXIF.getTag(this, "DateTimeOriginal");
+
+                    let result = { lat: null, lng: null, dateStr: dateOriginal, timestamp: file.lastModified };
+
+                    // 좌표 데이터가 온전한 배열(길이 3)인지 검증
+                    if (lat && lng && lat.length === 3 && lng.length === 3) {
+                        const convert = (dms, ref) => {
+                            let dec = dms[0] + dms[1]/60 + dms[2]/3600;
+                            return (ref === "S" || ref === "W") ? dec * -1 : dec;
+                        };
+                        result.lat = convert(lat, latRef);
+                        result.lng = convert(lng, lngRef);
+                    }
+                    resolve(result);
+                });
+            } catch (error) {
+                clearTimeout(timeoutId);
+                resolve({ lat: null, lng: null, dateStr: null, timestamp: file.lastModified });
+            }
         });
     }
 
